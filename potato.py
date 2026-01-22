@@ -10,16 +10,30 @@ st.set_page_config(
 )
 
 st.title("🥔 Potato Disease Classification")
-st.write("Upload a potato leaf image to predict the disease")
+st.write("Upload a **clear potato leaf image** to predict the disease")
 
 # ---------------- Thresholds ----------------
-CONFIDENCE_THRESHOLD = 70.0   # % (tune between 60–80)
-ENTROPY_THRESHOLD = 0.8       # lower = confident, higher = uncertain
+CONFIDENCE_THRESHOLD = 70.0   # %
+ENTROPY_THRESHOLD = 0.8       # uncertainty limit
 
-# ---------------- Utility function ----------------
+# ---------------- Utility functions ----------------
 def prediction_entropy(probs):
     probs = np.clip(probs, 1e-10, 1.0)
     return -np.sum(probs * np.log(probs))
+
+def is_probable_leaf(image: Image.Image) -> bool:
+    """
+    Rule-based leaf validation using green color dominance.
+    Blocks non-leaf images BEFORE model prediction.
+    """
+    img = np.array(image.resize((128, 128)))
+
+    r = img[:, :, 0].astype(float)
+    g = img[:, :, 1].astype(float)
+    b = img[:, :, 2].astype(float)
+
+    green_score = np.mean(g > r) + np.mean(g > b)
+    return green_score > 1.2   # threshold tuned for leaves
 
 # ---------------- Load model ----------------
 @st.cache_resource
@@ -37,23 +51,29 @@ class_names = [
 
 # ---------------- File uploader ----------------
 uploaded_file = st.file_uploader(
-    "Choose an image",
+    "Choose an image (JPG / PNG)",
     type=["jpg", "jpeg", "png"]
 )
 
 if uploaded_file is not None:
-    # Load and show image
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # ---------------- Preprocessing ----------------
-    # IMPORTANT:
-    # No resize / no normalization here
+    # ---------------- STEP 1: Leaf validation ----------------
+    if not is_probable_leaf(image):
+        st.error(
+            "❌ **Invalid image detected**\n\n"
+            "This does not appear to be a potato leaf.\n\n"
+            "👉 Please upload a **clear green potato leaf image**."
+        )
+        st.stop()
+
+    # ---------------- STEP 2: Model inference ----------------
+    # NO resizing / normalization here
     # (Handled inside the model)
     img_array = np.array(image, dtype=np.float32)
-    img_array = np.expand_dims(img_array, axis=0)  # (1,H,W,3)
+    img_array = np.expand_dims(img_array, axis=0)
 
-    # ---------------- Prediction ----------------
     predictions = model.predict(img_array)[0]
 
     predicted_index = np.argmax(predictions)
@@ -61,19 +81,16 @@ if uploaded_file is not None:
     confidence = predictions[predicted_index] * 100
     entropy = prediction_entropy(predictions)
 
-    # ---------------- Validation logic ----------------
+    # ---------------- STEP 3: Uncertainty check ----------------
     if confidence < CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD:
         st.error(
-            "❌ **Invalid or unsupported image**\n\n"
-            "Please upload a **clear potato leaf image**.\n\n"
-            "Supported classes:\n"
-            "- Early Blight\n"
-            "- Late Blight\n"
-            "- Healthy Leaf"
+            "⚠️ **Uncertain prediction**\n\n"
+            "The uploaded image is unclear or not suitable for diagnosis.\n\n"
+            "Please upload a **well-lit, close-up potato leaf image**."
         )
         st.info(
-            f"ℹ️ Model confidence: {confidence:.2f}%\n\n"
-            f"ℹ️ Prediction uncertainty (entropy): {entropy:.2f}"
+            f"Model confidence: {confidence:.2f}%\n\n"
+            f"Prediction uncertainty (entropy): {entropy:.2f}"
         )
     else:
         st.subheader("🔍 Prediction Probabilities")
