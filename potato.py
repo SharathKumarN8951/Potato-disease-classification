@@ -14,26 +14,34 @@ st.write("Upload a **clear potato leaf image** to predict the disease")
 
 # ---------------- Thresholds ----------------
 CONFIDENCE_THRESHOLD = 70.0   # %
-ENTROPY_THRESHOLD = 0.8       # uncertainty limit
+ENTROPY_THRESHOLD = 0.9       # slightly relaxed
 
 # ---------------- Utility functions ----------------
 def prediction_entropy(probs):
     probs = np.clip(probs, 1e-10, 1.0)
     return -np.sum(probs * np.log(probs))
 
+
 def is_probable_leaf(image: Image.Image) -> bool:
     """
-    Rule-based leaf validation using green color dominance.
-    Blocks non-leaf images BEFORE model prediction.
+    Improved leaf validation (RELAXED + ROBUST):
+    - Accepts real potato leaves (dark/light/shadow)
+    - Rejects blue, UI, objects, random images
     """
-    img = np.array(image.resize((128, 128)))
+    img = np.array(image.resize((128, 128))).astype(float)
 
-    r = img[:, :, 0].astype(float)
-    g = img[:, :, 1].astype(float)
-    b = img[:, :, 2].astype(float)
+    r = img[:, :, 0]
+    g = img[:, :, 1]
+    b = img[:, :, 2]
 
-    green_score = np.mean(g > r) + np.mean(g > b)
-    return green_score > 1.2   # threshold tuned for leaves
+    # Green dominance ratio
+    green_ratio = np.mean(g / (r + b + 1e-6))
+
+    # Overall brightness (avoid very dark / blank images)
+    brightness = np.mean((r + g + b) / 3)
+
+    return (green_ratio > 0.9) and (brightness > 40)
+
 
 # ---------------- Load model ----------------
 @st.cache_resource
@@ -83,14 +91,14 @@ if uploaded_file is not None:
 
     # ---------------- STEP 3: Uncertainty check ----------------
     if confidence < CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD:
-        st.error(
+        st.warning(
             "⚠️ **Uncertain prediction**\n\n"
-            "The uploaded image is unclear or not suitable for diagnosis.\n\n"
+            "The image is detected as a leaf, but confidence is low.\n\n"
             "Please upload a **well-lit, close-up potato leaf image**."
         )
         st.info(
-            f"Model confidence: {confidence:.2f}%\n\n"
-            f"Prediction uncertainty (entropy): {entropy:.2f}"
+            f"📊 Confidence: {confidence:.2f}%\n"
+            f"📈 Uncertainty (entropy): {entropy:.2f}"
         )
     else:
         st.subheader("🔍 Prediction Probabilities")
