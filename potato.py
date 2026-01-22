@@ -10,7 +10,7 @@ st.write("Upload a potato leaf image to predict the disease.")
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model("potatoes.h5")
+    return tf.keras.models.load_model("potatoes.keras")
 
 model = load_model()
 
