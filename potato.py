@@ -10,18 +10,16 @@ st.set_page_config(
 )
 
 st.title("🥔 Potato Disease Classification")
-st.write("Upload a potato leaf image")
+st.write("Upload a **clear potato leaf image** to predict the disease")
 
 # ---------------- Thresholds ----------------
-LOW_CONFIDENCE_THRESHOLD = 60.0
-HIGH_CONFIDENCE_THRESHOLD = 95.0
-ENTROPY_THRESHOLD = 1.0
+CONFIDENCE_THRESHOLD = 70.0   # %
+ENTROPY_THRESHOLD = 1.2       # uncertainty
 
-# ---------------- Utility functions ----------------
+# ---------------- Utility ----------------
 def prediction_entropy(probs):
     probs = np.clip(probs, 1e-10, 1.0)
     return -np.sum(probs * np.log(probs))
-
 
 # ---------------- Load model ----------------
 @st.cache_resource
@@ -30,10 +28,11 @@ def load_model():
 
 model = load_model()
 
+# ⚠️ MUST MATCH TRAINING ORDER EXACTLY
 class_names = [
-    "Potato__Early_blight",
-    "Potato__Late_blight",
-    "Potato__healthy"
+    "Potato___Early_blight",
+    "Potato___Late_blight",
+    "Potato___healthy"
 ]
 
 # ---------------- File uploader ----------------
@@ -46,7 +45,7 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # ---------------- Prediction ----------------
+    # ---------------- Model inference ----------------
     img_array = np.array(image, dtype=np.float32)
     img_array = np.expand_dims(img_array, axis=0)
 
@@ -58,27 +57,25 @@ if uploaded_file is not None:
     entropy = prediction_entropy(predictions)
 
     # ---------------- NON-LEAF DECISION ----------------
-    is_non_leaf = (
-        confidence > HIGH_CONFIDENCE_THRESHOLD and entropy < 0.6
-    ) or (
-        confidence < LOW_CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD
-    )
-
-    if is_non_leaf:
+    if confidence < CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD:
         st.error("❌ **Prediction: NON-LEAF IMAGE**")
         st.info(
             "This image does not appear to be a potato leaf.\n\n"
-            "👉 Please upload a clear potato leaf image."
+            "👉 Please upload a **clear, close-up potato leaf image**."
         )
 
-        st.subheader("🔍 Model Output (for debugging)")
-        for i, cls in enumerate(class_names):
-            st.write(f"{cls}: {predictions[i] * 100:.2f}%")
+        # Optional debug output
+        with st.expander("🔍 Model output (debug)"):
+            for i, cls in enumerate(class_names):
+                st.write(f"{cls}: {predictions[i] * 100:.2f}%")
+            st.write(f"Entropy: {entropy:.2f}")
 
-    else:
-        st.subheader("🔍 Prediction Probabilities")
-        for i, cls in enumerate(class_names):
-            st.write(f"{cls}: {predictions[i] * 100:.2f}%")
+        st.stop()
 
-        st.success(f"✅ Prediction: **{predicted_class}**")
-        st.info(f"📊 Confidence: **{confidence:.2f}%**")
+    # ---------------- VALID LEAF RESULT ----------------
+    st.subheader("🔍 Prediction Probabilities")
+    for i, cls in enumerate(class_names):
+        st.write(f"{cls}: {predictions[i] * 100:.2f}%")
+
+    st.success(f"✅ Prediction: **{predicted_class}**")
+    st.info(f"📊 Confidence: **{confidence:.2f}%**")
