@@ -10,40 +10,17 @@ st.set_page_config(
 )
 
 st.title("🥔 Potato Disease Classification")
-st.write("Upload a **clear potato leaf image** to predict the disease")
+st.write("Upload a potato leaf image")
 
 # ---------------- Thresholds ----------------
-CONFIDENCE_THRESHOLD = 65.0        # below this → low confidence
-ENTROPY_THRESHOLD = 1.1            # above this → uncertain
-OVERCONFIDENCE_THRESHOLD = 95.0    # very confident on junk → reject
+LOW_CONFIDENCE_THRESHOLD = 60.0
+HIGH_CONFIDENCE_THRESHOLD = 95.0
+ENTROPY_THRESHOLD = 1.0
 
 # ---------------- Utility functions ----------------
 def prediction_entropy(probs):
     probs = np.clip(probs, 1e-10, 1.0)
     return -np.sum(probs * np.log(probs))
-
-
-def is_valid_image(image: Image.Image) -> bool:
-    """
-    VERY LENIENT image validation
-    Blocks only:
-    - Blank images
-    - Extremely dark / bright images
-    - Low-texture UI / documents
-    """
-    img = np.array(image.resize((128, 128))).astype(float)
-
-    brightness = np.mean(img)
-    contrast = np.std(img)
-
-    if brightness < 30:      # too dark
-        return False
-    if brightness > 245:     # too bright / white
-        return False
-    if contrast < 15:        # very flat image (UI / doc)
-        return False
-
-    return True
 
 
 # ---------------- Load model ----------------
@@ -53,7 +30,6 @@ def load_model():
 
 model = load_model()
 
-# ⚠️ MUST MATCH training class names
 class_names = [
     "Potato__Early_blight",
     "Potato__Late_blight",
@@ -70,17 +46,7 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # ---------------- STEP 1: Basic image validation ----------------
-    if not is_valid_image(image):
-        st.error(
-            "❌ **Invalid image detected**\n\n"
-            "This image is not suitable for potato disease detection.\n\n"
-            "👉 Please upload a **clear potato leaf image**."
-        )
-        st.stop()
-
-    # ---------------- STEP 2: Model inference ----------------
-    # No resize / normalization here (handled inside model)
+    # ---------------- Prediction ----------------
     img_array = np.array(image, dtype=np.float32)
     img_array = np.expand_dims(img_array, axis=0)
 
@@ -91,27 +57,28 @@ if uploaded_file is not None:
     confidence = predictions[predicted_index] * 100
     entropy = prediction_entropy(predictions)
 
-    # ---------------- STEP 3: Hard reject overconfident junk ----------------
-    if confidence > OVERCONFIDENCE_THRESHOLD and entropy < 0.6:
-        st.error(
-            "❌ **Invalid input detected**\n\n"
+    # ---------------- NON-LEAF DECISION ----------------
+    is_non_leaf = (
+        confidence > HIGH_CONFIDENCE_THRESHOLD and entropy < 0.6
+    ) or (
+        confidence < LOW_CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD
+    )
+
+    if is_non_leaf:
+        st.error("❌ **Prediction: NON-LEAF IMAGE**")
+        st.info(
             "This image does not appear to be a potato leaf.\n\n"
-            "👉 Please upload a **clear potato leaf image only**."
-        )
-        st.stop()
-
-    # ---------------- STEP 4: Confidence / uncertainty warning ----------------
-    if confidence < CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD:
-        st.warning(
-            "⚠️ **Low confidence prediction**\n\n"
-            "The image was processed, but the model is uncertain.\n\n"
-            "Try uploading a **well-lit, close-up potato leaf image**."
+            "👉 Please upload a clear potato leaf image."
         )
 
-    # ---------------- STEP 5: Display results ----------------
-    st.subheader("🔍 Prediction Probabilities")
-    for i, cls in enumerate(class_names):
-        st.write(f"{cls}: {predictions[i] * 100:.2f}%")
+        st.subheader("🔍 Model Output (for debugging)")
+        for i, cls in enumerate(class_names):
+            st.write(f"{cls}: {predictions[i] * 100:.2f}%")
 
-    st.success(f"✅ Prediction: **{predicted_class}**")
-    st.info(f"📊 Confidence: **{confidence:.2f}%**")
+    else:
+        st.subheader("🔍 Prediction Probabilities")
+        for i, cls in enumerate(class_names):
+            st.write(f"{cls}: {predictions[i] * 100:.2f}%")
+
+        st.success(f"✅ Prediction: **{predicted_class}**")
+        st.info(f"📊 Confidence: **{confidence:.2f}%**")
